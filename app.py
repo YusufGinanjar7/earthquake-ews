@@ -1,85 +1,144 @@
-import os
-import joblib
+import streamlit as st
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import joblib
+
 from utils.feature_extraction import extract_features
 
-# =====================
-# Load model & features
-# =====================
-MODEL_PATH = "lgbm_final.pkl"
-FEATURES_PATH = "features.pkl"
-
-model = joblib.load(MODEL_PATH)
-features = joblib.load(FEATURES_PATH)
-
-# =====================
-# FastAPI app
-# =====================
-app = FastAPI(
-    title="EWS Acoustic AI",
-    description="Predict Time to Failure from Acoustic Signal",
-    version="1.0"
+# =========================================================
+# CONFIG
+# =========================================================
+st.set_page_config(
+    page_title="Earthquake Early Warning System",
+    page_icon="🌍",
+    layout="centered"
 )
 
-# =====================
-# Health check
-# =====================
-@app.get("/")
-def health():
-    return {"status": "ok", "message": "EWS AI is running"}
+# =========================================================
+# LOAD MODEL
+# =========================================================
+model = joblib.load("lgbm_final.pkl")
+features = joblib.load("features.pkl")
 
-# =====================
-# Prediction endpoint
-# =====================
-@app.post("/predict")
-def predict(file: UploadFile = File(...)):
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="File must be CSV")
+# =========================================================
+# HEADER
+# =========================================================
+st.title("🌍 Earthquake Early Warning System (EWS)")
+st.caption("AI-based Vibration Signal Analysis for Early Earthquake Detection")
 
+st.markdown("---")
+
+# =========================================================
+# ABOUT SYSTEM
+# =========================================================
+with st.expander("ℹ️ About This System", expanded=True):
+    st.markdown("""
+**Earthquake Early Warning System (EWS)** ini menggunakan **Artificial Intelligence**
+untuk menganalisis **sinyal getaran (acoustic / vibration data)** dari sensor.
+
+Model ini mempelajari **pola statistik & spektral (FFT)** dari data getaran
+untuk **memprediksi waktu menuju potensi kegagalan / kejadian besar (Time to Failure)**.
+
+💡 **Tujuan sistem:**
+- Deteksi dini potensi gempa
+- Memberikan peringatan lebih awal
+- Mendukung sistem mitigasi bencana
+
+⚙️ **Model yang digunakan:**
+- LightGBM Regression
+- Feature Engineering (Statistik + FFT)
+- Trained on segmented seismic signal data
+""")
+
+# =========================================================
+# DATA DESCRIPTION
+# =========================================================
+with st.expander("📄 Data Input Description", expanded=True):
+    st.markdown("""
+### 📥 Format Data yang Diperlukan
+
+Silakan upload file **CSV** dengan ketentuan berikut:
+
+- **Harus memiliki kolom:** `acoustic_data`
+- Setiap baris merepresentasikan **sinyal getaran**
+- Data berasal dari:
+  - Sensor getaran
+  - Accelerometer
+  - Seismic / acoustic sensor
+
+### Contoh Struktur CSV:
+acoustic_data
+12
+-8
+15
+-20
+...
+
+📌 **Catatan penting:**
+- Semakin panjang sinyal, semakin stabil prediksi
+- Sistem ini **tidak memerlukan label**
+- Data diproses secara otomatis oleh AI
+""")
+
+st.markdown("---")
+
+# =========================================================
+# FILE UPLOADER
+# =========================================================
+st.subheader("📤 Upload Vibration Data")
+
+uploaded_file = st.file_uploader(
+    "Upload file CSV berisi data getaran",
+    type=["csv"]
+)
+
+# =========================================================
+# PREDICTION
+# =========================================================
+if uploaded_file:
     try:
-        df = pd.read_csv(file.file)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid CSV file")
+        df = pd.read_csv(uploaded_file)
 
-    if "acoustic_data" not in df.columns:
-        raise HTTPException(
-            status_code=400,
-            detail="CSV must contain 'acoustic_data' column"
+        if "acoustic_data" not in df.columns:
+            st.error("❌ Kolom `acoustic_data` tidak ditemukan di file CSV.")
+            st.stop()
+
+        x = df["acoustic_data"].values
+
+        with st.spinner("🔍 Analyzing vibration signal..."):
+            feat = extract_features(x)
+            X = pd.DataFrame([feat])[features]
+            pred_log = model.predict(X)[0]
+            prediction = np.expm1(pred_log)
+
+        st.success("✅ Prediction Completed")
+
+        # =================================================
+        # OUTPUT
+        # =================================================
+        st.markdown("### 📊 Prediction Result")
+
+        st.metric(
+            label="Estimated Time to Failure",
+            value=f"{prediction:.2f} seconds"
         )
 
-    x = df["acoustic_data"].values.astype(np.float32)
+        # Simple risk interpretation
+        if prediction < 3:
+            st.error("🚨 HIGH RISK — Immediate attention required")
+        elif prediction < 7:
+            st.warning("⚠️ MEDIUM RISK — Monitor closely")
+        else:
+            st.success("🟢 LOW RISK — Condition appears stable")
 
-    if len(x) < 1000:
-        raise HTTPException(
-            status_code=400,
-            detail="acoustic_data too short"
-        )
+    except Exception as e:
+        st.error(f"❌ Error occurred: {e}")
 
-    # Feature extraction
-    feat = extract_features(x)
-
-    # Build dataframe in correct order
-    X = pd.DataFrame([feat])[features]
-
-    # Predict (log target → inverse)
-    y_log_pred = model.predict(X)[0]
-    y_pred = np.expm1(y_log_pred)
-
-    return {
-        "prediction_time_to_failure_seconds": float(y_pred),
-        "prediction_time_to_failure_minutes": float(y_pred / 60)
-    }
-
-
-# =====================
-# Local run (Railway compatible)
-# =====================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000))
-    )
+# =========================================================
+# FOOTER
+# =========================================================
+st.markdown("---")
+st.caption(
+    "⚠️ This system is a **decision-support tool** and should be used together "
+    "with professional monitoring systems and expert judgment."
+)
