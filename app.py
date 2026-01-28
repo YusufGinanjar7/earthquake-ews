@@ -90,11 +90,19 @@ if uploaded_file:
 
         with st.spinner("🔍 Sending data to AI model..."):
             client = Client("suyagi/earthquakes-try")
-
+        
+            import tempfile, os
+        
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                tmp_path = tmp.name
+        
             result = client.predict(
-                uploaded_file,
+                tmp_path,
                 api_name="/predict"
             )
+        
+            os.remove(tmp_path)
 
         # =================================================
         # OUTPUT HANDLING
@@ -133,3 +141,4 @@ st.caption(
     "⚠️ This system is a **decision-support tool**. "
     "Predictions should be combined with official seismic monitoring systems."
 )
+
