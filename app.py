@@ -17,68 +17,52 @@ st.set_page_config(
 st.title("🌍 Earthquake Early Warning System (EWS)")
 st.caption("AI-based Vibration Signal Analysis for Early Earthquake Detection")
 
-st.markdown("---")
+st.divider()
 
 # =========================================================
 # ABOUT SYSTEM
 # =========================================================
 with st.expander("ℹ️ About This System", expanded=True):
     st.markdown("""
-**Earthquake Early Warning System (EWS)** ini menggunakan **Artificial Intelligence**
-untuk menganalisis **sinyal getaran (acoustic / vibration data)** dari sensor.
+**Earthquake Early Warning System (EWS)** menggunakan **Artificial Intelligence**
+untuk menganalisis **sinyal getaran (acoustic / vibration data)** dari sensor seismik.
 
-Model dijalankan secara **remote di Hugging Face** dan mempelajari  
-**pola statistik & spektral (FFT)** dari sinyal getaran untuk memprediksi:
+Model dijalankan **secara remote di Hugging Face (Gradio API)** dan mempelajari  
+pola **statistik & spektral (FFT)** untuk memprediksi:
 
-> ⏱️ **Estimated Time to Failure**
+> ⏱️ **Estimated Time to Failure (TTF)**
 
-💡 **Tujuan sistem:**
-- Deteksi dini potensi gempa
-- Memberikan peringatan lebih awal
-- Mendukung mitigasi risiko bencana
-
-⚙️ **Model:**
+**Teknologi:**
 - LightGBM Regression
 - Feature Engineering (Statistical + FFT)
-- Deployed on Hugging Face (Gradio)
+- Cloud-based inference (Hugging Face)
 """)
 
 # =========================================================
-# DATA DESCRIPTION
+# DATA INPUT DESCRIPTION
 # =========================================================
 with st.expander("📄 Data Input Description", expanded=True):
     st.markdown("""
-### 📥 Format Data yang Diperlukan
-
-Upload file **CSV** dengan ketentuan:
-
-- Kolom wajib: **`acoustic_data`**
+### 📥 CSV Requirements
+- Wajib memiliki kolom: **`acoustic_data`**
 - Setiap baris = satu sinyal getaran
-- Data berasal dari:
-  - Sensor seismik
-  - Accelerometer
-  - Acoustic / vibration sensor
+- Tidak memerlukan label
 
-### Contoh Struktur CSV
+Contoh:
+
 acoustic_data
 12
 -8
 15
 -20
-...
-
-📌 **Catatan:**
-- Tidak memerlukan label
-- Semakin panjang sinyal → prediksi lebih stabil
-- Seluruh proses feature extraction dilakukan oleh AI
 """)
 
-st.markdown("---")
+st.divider()
 
 # =========================================================
 # FILE UPLOADER
 # =========================================================
-st.subheader("📤 Upload Vibration Data")
+st.subheader("📤 Upload Vibration Data (CSV)")
 
 uploaded_file = st.file_uploader(
     "Upload file CSV berisi data getaran",
@@ -90,26 +74,38 @@ uploaded_file = st.file_uploader(
 # =========================================================
 if uploaded_file:
     try:
-        # basic validation (optional, ringan)
         df = pd.read_csv(uploaded_file)
+
+        # Validation
         if "acoustic_data" not in df.columns:
-            st.error("❌ Kolom `acoustic_data` tidak ditemukan di file CSV.")
+            st.error("❌ Kolom `acoustic_data` tidak ditemukan.")
             st.stop()
+
+        if df.empty:
+            st.error("❌ File CSV kosong.")
+            st.stop()
+
+        st.success(f"✅ Data loaded ({len(df)} samples)")
+        st.dataframe(df.head())
 
         with st.spinner("🔍 Sending data to AI model..."):
             client = Client("suyagi/earthquakes-try")
 
-            # kirim file langsung ke Hugging Face
-            prediction = client.predict(
+            result = client.predict(
                 uploaded_file,
                 api_name="/predict"
             )
 
-        st.success("✅ Prediction Completed")
+        # =================================================
+        # OUTPUT HANDLING
+        # =================================================
+        if isinstance(result, (list, tuple)):
+            prediction = float(result[0])
+        elif isinstance(result, dict):
+            prediction = float(list(result.values())[0])
+        else:
+            prediction = float(result)
 
-        # =================================================
-        # OUTPUT
-        # =================================================
         st.markdown("### 📊 Prediction Result")
 
         st.metric(
@@ -132,7 +128,7 @@ if uploaded_file:
 # =========================================================
 # FOOTER
 # =========================================================
-st.markdown("---")
+st.divider()
 st.caption(
     "⚠️ This system is a **decision-support tool**. "
     "Predictions should be combined with official seismic monitoring systems."
