@@ -1,9 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import joblib
-
-from utils.feature_extraction import extract_features
+from gradio_client import Client
 
 # =========================================================
 # CONFIG
@@ -13,12 +10,6 @@ st.set_page_config(
     page_icon="🌍",
     layout="centered"
 )
-
-# =========================================================
-# LOAD MODEL
-# =========================================================
-model = joblib.load("lgbm_final.pkl")
-features = joblib.load("features.pkl")
 
 # =========================================================
 # HEADER
@@ -36,18 +27,20 @@ with st.expander("ℹ️ About This System", expanded=True):
 **Earthquake Early Warning System (EWS)** ini menggunakan **Artificial Intelligence**
 untuk menganalisis **sinyal getaran (acoustic / vibration data)** dari sensor.
 
-Model ini mempelajari **pola statistik & spektral (FFT)** dari data getaran
-untuk **memprediksi waktu menuju potensi kegagalan / kejadian besar (Time to Failure)**.
+Model dijalankan secara **remote di Hugging Face** dan mempelajari  
+**pola statistik & spektral (FFT)** dari sinyal getaran untuk memprediksi:
+
+> ⏱️ **Estimated Time to Failure**
 
 💡 **Tujuan sistem:**
 - Deteksi dini potensi gempa
 - Memberikan peringatan lebih awal
-- Mendukung sistem mitigasi bencana
+- Mendukung mitigasi risiko bencana
 
-⚙️ **Model yang digunakan:**
+⚙️ **Model:**
 - LightGBM Regression
-- Feature Engineering (Statistik + FFT)
-- Trained on segmented seismic signal data
+- Feature Engineering (Statistical + FFT)
+- Deployed on Hugging Face (Gradio)
 """)
 
 # =========================================================
@@ -57,16 +50,16 @@ with st.expander("📄 Data Input Description", expanded=True):
     st.markdown("""
 ### 📥 Format Data yang Diperlukan
 
-Silakan upload file **CSV** dengan ketentuan berikut:
+Upload file **CSV** dengan ketentuan:
 
-- **Harus memiliki kolom:** `acoustic_data`
-- Setiap baris merepresentasikan **sinyal getaran**
+- Kolom wajib: **`acoustic_data`**
+- Setiap baris = satu sinyal getaran
 - Data berasal dari:
-  - Sensor getaran
+  - Sensor seismik
   - Accelerometer
-  - Seismic / acoustic sensor
+  - Acoustic / vibration sensor
 
-### Contoh Struktur CSV:
+### Contoh Struktur CSV
 acoustic_data
 12
 -8
@@ -74,10 +67,10 @@ acoustic_data
 -20
 ...
 
-📌 **Catatan penting:**
-- Semakin panjang sinyal, semakin stabil prediksi
-- Sistem ini **tidak memerlukan label**
-- Data diproses secara otomatis oleh AI
+📌 **Catatan:**
+- Tidak memerlukan label
+- Semakin panjang sinyal → prediksi lebih stabil
+- Seluruh proses feature extraction dilakukan oleh AI
 """)
 
 st.markdown("---")
@@ -97,19 +90,20 @@ uploaded_file = st.file_uploader(
 # =========================================================
 if uploaded_file:
     try:
+        # basic validation (optional, ringan)
         df = pd.read_csv(uploaded_file)
-
         if "acoustic_data" not in df.columns:
             st.error("❌ Kolom `acoustic_data` tidak ditemukan di file CSV.")
             st.stop()
 
-        x = df["acoustic_data"].values
+        with st.spinner("🔍 Sending data to AI model..."):
+            client = Client("suyagi/earthquakes-try")
 
-        with st.spinner("🔍 Analyzing vibration signal..."):
-            feat = extract_features(x)
-            X = pd.DataFrame([feat])[features]
-            pred_log = model.predict(X)[0]
-            prediction = np.expm1(pred_log)
+            # kirim file langsung ke Hugging Face
+            prediction = client.predict(
+                uploaded_file,
+                api_name="/predict"
+            )
 
         st.success("✅ Prediction Completed")
 
@@ -123,7 +117,7 @@ if uploaded_file:
             value=f"{prediction:.2f} seconds"
         )
 
-        # Simple risk interpretation
+        # Risk interpretation
         if prediction < 3:
             st.error("🚨 HIGH RISK — Immediate attention required")
         elif prediction < 7:
@@ -132,13 +126,14 @@ if uploaded_file:
             st.success("🟢 LOW RISK — Condition appears stable")
 
     except Exception as e:
-        st.error(f"❌ Error occurred: {e}")
+        st.error("❌ Prediction failed")
+        st.code(str(e))
 
 # =========================================================
 # FOOTER
 # =========================================================
 st.markdown("---")
 st.caption(
-    "⚠️ This system is a **decision-support tool** and should be used together "
-    "with professional monitoring systems and expert judgment."
+    "⚠️ This system is a **decision-support tool**. "
+    "Predictions should be combined with official seismic monitoring systems."
 )
